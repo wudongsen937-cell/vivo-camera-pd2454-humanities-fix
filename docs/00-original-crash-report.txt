@@ -1,0 +1,76 @@
+vivo 相机移植版「人文街拍相机」闪退诊断报告
+=====================================================
+日期      2026-11-14
+设备      vivo V2454A (PD2454), Android 17
+          指纹 vivo/PD2454/PD2454:17/CP2A.260605.016_V000L1/261106232919:user/release-keys
+故障应用  dev.x200.vivomod / com.android.camera.CameraActivity
+          versionName 16.1.4.183, versionCode 160104183
+          安装于 2026-11-14 14:19:53, base.apk 514.8 MB
+对照应用  com.android.camera 13.0.55.13 (系统原生相机, 人文街拍正常)
+
+【复现步骤】
+1. 打开「vivo相机移植测试」(桌面第三行最右图标) → 拍照模式正常出图
+2. 点击底部「人文街拍相机」箭头
+   (id: dev.x200.vivomod:id/iv_layer_bottom_center_icon, bounds [0,2888][1440,3032])
+3. 立即闪退回桌面，100% 必现
+
+【崩溃堆栈】
+FATAL EXCEPTION: main
+Process: dev.x200.vivomod, PID: 8597
+java.lang.NumberFormatException: For input string: "Wide"
+  at jdk.internal.math.FloatingDecimal.readJavaFormatString(FloatingDecimal.java:2054)
+  at java.lang.Float.parseFloat(Float.java:556)
+  at com.android.camera.ui.commonui.zoomui.widget.f.A(ZoomCircleFrontManager.java:63)
+  at com.android.camera.ui.commonui.zoomui.widget.f.o(ZoomCircleFrontManager.java:6)
+  at fg.m.W(ZoomUIController.java:122)
+  at eg.a$a.b(BaseZoomPresenter.java:35)
+  at com.android.camera.ui.commonui.zoomui.base.e.execute(BaseZoomModelImpl.java:106)
+  at com.android.camera.ui.ext.commonui.DefaultCommonUIHandler.updateAllUI(...:51)
+  at com.android.camera.ui.ext.DefaultUICtlHandler.dispatchSettingEvent(...:350)
+  at com.android.camera.setting.SettingBusinessProcessor.changeCameraOrModule(...:962)
+  at com.android.camera.setting.SettingBusinessProcessor.onSettingsChange(...:24)
+  at com.android.camera.setting.rule.SettingRuleManager.triggerStateChange(...:379)
+  at com.android.camera.ui.core.CameraUIController.handleUICommand(...:389)
+  at com.android.camera.viewpageui.viewpage2.d.onPageScrolled(AbsViewPageUI.java:68)
+  at com.android.camera.humanities.ui.viewpagerui.HumanitiesViewPagerUI.onPageScrolled(...:24)
+  ... Choreographer / ActivityThread.main
+
+CAP_VivoCameraCrashHandler: currentModule: humanities, isFront: false
+am_crash: [8597,0,dev.x200.vivomod,819477574,java.lang.NumberFormatException,For input string: "Wide",FloatingDecimal.java,2054,0]
+崩溃前操作轨迹: C：<人文街拍相机>,[CameraPointButton],[app:id/iv_layer_bottom_center_icon]
+                S：<>,[TextView],[app:id/module_camera_lens_ai_text]
+
+【根因】
+切换到 humanities 模块时，设置规则触发 changeCameraOrModule → updateAllUI，
+变焦圆环 ZoomCircleFrontManager 把镜头标签字符串 "Wide" 当作数值焦距传给
+Float.parseFloat，主线程抛 NumberFormatException，进程被杀，Activity force-crash。
+
+【对照实验（关键）】
+同一台机器、同一套相机 HAL、同一份 /vendor/etc/camera/camera_config.xml：
+- 系统原生相机 13.0.55.13「人文街拍相机」→ 正常进入，黑白预览 + 14/35/50/85/135mm
+  焦段 + ISO/快门/WB/EV 参数齐全
+- 移植包 16.1.4.183 → 必崩
+因此不是硬件、HAL、机型伪装或系统相机配置导致，问题在移植包自身代码/焦段配置。
+
+【已实测排除】
+- 关闭系统动画 (window/transition/animator_duration_scale = 0)：仍崩
+- 进入人文前预设 50mm 焦段：仍崩
+- run-as 全量 grep 应用私有数据 (shared_prefs/files/databases/cache)：无 "Wide"，非脏数据
+- /vendor/etc/camera/camera_config.xml 中为小写 <ModuleType>wide</ModuleType>，
+  与崩溃里的 "Wide" 大小写不一致，改 vendor 配置不对症且会影响系统相机（不推荐）
+
+【修复建议】
+1. 首选：换针对 PD2454/V2454A 的适配版，或回退一个移植版本。
+   该包 2026-10-24/25 编译，其中 libvivomod_portrait.so 为 10-25 单独修改。
+2. 改包：在 ZoomCircleFrontManager (混淆后 com.android.camera.ui.commonui.zoomui.widget.f.A)
+   的 parseFloat 前加标签白名单 / try-catch，把 "Wide" 映射为 1.0f (主摄 1x)，重签名安装。
+3. 临时绕过：设备已装 LSPosed，作用域仅勾 dev.x200.vivomod，
+   hook java.lang.Float.parseFloat(String)：入参 "Wide" 时返回 1.0f。
+
+【验证方法】
+换包或打补丁后：打开应用 → 点底部人文街拍箭头 → 停留在相机界面且出现焦段条/黑白预览
+即为修复；adb logcat -d -v threadtime | grep NumberFormatException 应无输出。
+
+【本机环境备注】
+操作经系统 adb 完成，设备序列号已隐去。
+未修改任何系统文件，未清除应用数据，未删除照片；动画缩放已恢复 1.0。
