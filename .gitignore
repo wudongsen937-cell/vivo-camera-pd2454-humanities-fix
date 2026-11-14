@@ -1,0 +1,27 @@
+# 二进制与大文件产物
+*.apk
+*.apks
+*.idsig
+*.dex
+*.so
+*.jar
+*.tar
+
+# 签名材料与应用私有数据，绝不入库
+*.keystore
+*.jks
+keystore.pass
+appdata.tar
+package_dump.txt
+
+# 设备日志
+log_*.txt
+*.log
+ui*.xml
+
+# 本地截图：含设备状态和浮窗，只留在自己机器上
+docs/img/
+
+# 本地工作目录
+dist/
+backup/
